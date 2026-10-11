@@ -32,22 +32,7 @@ android {
 
     localAuthenticationAssets?.let { sourceSets.getByName("main").assets.srcDir(it) }
 
-    signingConfigs {
-        create("release") {
-            // 仅当 CI/本地提供了 KEYSTORE_PATH 时才设置 storeFile
-            val ksPath = System.getenv("KEYSTORE_PATH")
-            if (ksPath != null && file(ksPath).exists()) {
-                storeFile = file(ksPath)
-                storePassword = System.getenv("KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("KEY_ALIAS")
-                keyPassword = System.getenv("KEY_PASSWORD")
-            }
-        }
-    }
-
     buildTypes {
-
-
 
         debug {
             applicationIdSuffix = ".hudtest"
@@ -62,7 +47,6 @@ android {
             optimization {
                 enable = false
             }
-            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
