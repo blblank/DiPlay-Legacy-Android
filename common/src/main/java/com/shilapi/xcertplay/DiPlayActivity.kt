@@ -1232,12 +1232,15 @@ class DiPlayActivity : ComponentActivity() {
         filteredSection(content, SettingsSection.DIAGNOSTICS,
             getString(R.string.diagnostics), R.drawable.ic_dp_diagnostics) { card ->
             exportButton = button(if (exportInProgress) getString(R.string.saving_report) else getString(R.string.save_diagnostic_report), false) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) exportDiagnostics()
-                else chooseReportDestination()
+                // Android 4.4.2 车机通常没有 DocumentsUI，SAF 会失败；统一走无 picker 直写 Downloads。
+                exportDiagnostics()
             }.apply { isEnabled = !exportInProgress }
             card.addView(exportButton, matchButton(10, 60))
-            card.addView(button(getString(R.string.choose_save_location), false) { chooseReportDestination() }, matchButton(10, 60))
-            val destination = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) getString(R.string.reports_save_to_downloads_diplay) else getString(R.string.choose_where_to_save_your_report)
+            // 只有 API 29+ 才提供"选择保存位置"（SAF picker）；4.4.2 上隐藏。
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                card.addView(button(getString(R.string.choose_save_location), false) { chooseReportDestination() }, matchButton(10, 60))
+            }
+            val destination = getString(R.string.reports_save_to_downloads_diplay)
             card.addView(label(destination + getString(R.string.nothing_is_sent_automatically_protocol_payloads_and_creden), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
         }
         filteredSection(content, SettingsSection.AUTOMATIC_CONNECTION,
@@ -3960,9 +3963,14 @@ class DiPlayActivity : ComponentActivity() {
     private fun reportFileName() = "DiPlay-${SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())}.txt"
 
     private fun chooseReportDestination() {
+        if (exportInProgress) return
+        // Android 9 及以下没有稳定的 DocumentsUI，直接走无 picker 保存。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            exportDiagnostics()
+            return
+        }
         // Some head units omit or disable DocumentsUI. Launch itself can throw, before
         // the result callback and the background writer's exception handler ever run.
-        if (exportInProgress) return
         runCatching { export.launch(reportFileName()) }.onFailure { exportDiagnostics() }
     }
 
@@ -4059,8 +4067,7 @@ class DiPlayActivity : ComponentActivity() {
                     AlertDialog.Builder(this).setTitle(getString(R.string.diagnostic_report_saved))
                         .setMessage(when {
                             savedReport.savedInApp -> getString(R.string.diagnostic_report_saved_in_app)
-                            savedReport.savedPath != null -> getString(R.string.diagnostic_report_saved_to_path, savedReport.savedPath) +
-                                if (savedReport.copyPaths.isEmpty()) "\n" + getString(R.string.report_usb_copy_unavailable) else "\n" + getString(R.string.report_usb_copy_paths, savedReport.copyPaths.joinToString("\n"))
+                            savedReport.savedPath != null -> getString(R.string.diagnostic_report_saved_to_path, savedReport.savedPath)
                             uri == null -> "Downloads/DiPlay/$fileName"
                             else -> getString(R.string.your_report_was_saved_to_the_selected_location)
                         })
@@ -4078,7 +4085,10 @@ class DiPlayActivity : ComponentActivity() {
                 } else {
                     AlertDialog.Builder(this).setTitle(getString(R.string.could_not_save_the_report))
                         .setMessage(getString(R.string.check_that_storage_is_available_or_choose_another_save_loc))
-                        .setPositiveButton(getString(R.string.choose_location)) { _, _ -> chooseReportDestination() }
+                        .setPositiveButton(getString(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                            R.string.choose_location else R.string.close)) { _, _ ->
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) chooseReportDestination()
+                        }
                         .setNegativeButton(getString(R.string.close), null).show()
                 }
             }
