@@ -1,7 +1,6 @@
 package com.shilapi.xcertplay
 
 import android.Manifest
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -728,33 +727,14 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun requestVpnConsent() {
         if (awaitingVpnConsent) return
-        val consent = try {
-            CarPlayVpnService.prepare(this)
-        } catch (e: Exception) {
-            Log.w(TAG, "CarPlayVpnService.prepare failed", e)
-            null
-        }
+        val consent = CarPlayVpnService.prepare(this)
         if (consent == null) {
             vpnReady = true
             maybeStartCarPlay()
         } else {
             vpnReady = false
             awaitingVpnConsent = true
-            try {
-                vpnConsent.launch(consent)
-            } catch (e: ActivityNotFoundException) {
-                Log.w(TAG, "VPN confirmation dialog not found on device (com.android.vpndialogs missing)", e)
-                appendLog("VPN dialog unavailable (com.android.vpndialogs missing), proceeding")
-                awaitingVpnConsent = false
-                vpnReady = true
-                maybeStartCarPlay()
-            } catch (e: SecurityException) {
-                Log.w(TAG, "VPN confirmation dialog launch permission denied", e)
-                appendLog("VPN dialog launch denied, proceeding")
-                awaitingVpnConsent = false
-                vpnReady = true
-                maybeStartCarPlay()
-            }
+            vpnConsent.launch(consent)
         }
     }
 
@@ -2062,23 +2042,6 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(12) },
         )
 
-        val restartApplicationButton = Button(this).apply {
-            text = getString(R.string.restart_application)
-            isAllCaps = false
-            textSize = 17f
-            setTextColor(Color.WHITE)
-            ViewCompat.setBackgroundTintList(this, ColorStateList.valueOf(MENU_DANGER))
-            minHeight = dp(52)
-            setOnClickListener { restartApplication() }
-        }
-        content.addView(
-            restartApplicationButton,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(12) },
-        )
-
         content.addView(Button(this).apply {
             text = getString(R.string.language_app_language)
             isAllCaps = false
@@ -2639,17 +2602,6 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         actions.addView(
             Button(this).apply {
-                text = getString(R.string.preset_brand_icons)
-                isAllCaps = false
-                setOnClickListener { showCarBrandPresetsDialog() }
-            },
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ),
-        )
-        actions.addView(
-            Button(this).apply {
                 text = getString(R.string.choose_image)
                 isAllCaps = false
                 setOnClickListener {
@@ -2670,7 +2622,7 @@ class CarPlayHostActivity : ComponentActivity() {
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(8) },
+            ),
         )
         actions.addView(
             Button(this).apply {
@@ -2713,32 +2665,6 @@ class CarPlayHostActivity : ComponentActivity() {
         iconStatusView = status
         updateAirPlayIconPreview()
         return section
-    }
-
-    private fun showCarBrandPresetsDialog() {
-        val presets = CarBrandPresets.ALL
-        val items = presets.map { it.displayName(this) }.toTypedArray()
-        android.app.AlertDialog.Builder(this)
-            .setTitle(getString(R.string.car_brand_presets_title))
-            .setItems(items) { _, which ->
-                val preset = presets[which]
-                val bytes = preset.loadBytes(this)
-                if (bytes != null) {
-                    AirPlayPersistence.saveCustomAirPlayIcon(this, bytes)
-                    val currentOem = AirPlayPersistence.loadOemLabel(this)
-                    if (currentOem.isBlank() || currentOem == AirPlayPersistence.DEFAULT_OEM_LABEL) {
-                        AirPlayPersistence.saveOemLabel(this, preset.defaultOemName)
-                    }
-                    updateAirPlayIconPreview()
-                    android.widget.Toast.makeText(
-                        this,
-                        getString(R.string.car_brand_icon_applied, preset.displayName(this)),
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                }
-            }
-            .setNegativeButton(getString(R.string.cancel), null)
-            .show()
     }
 
     // Between the driver's side and the bottom the dock moves at once (and is saved at once) when the
@@ -3698,7 +3624,6 @@ class CarPlayHostActivity : ComponentActivity() {
             rightHandDrive = rightHandDrive,
             hevc = hevcEnabled,
             microphone = microphoneAvailable,
-            microphoneOpus = com.shilapi.xcertplay.media.OpusEncoderSupport.isAvailable(),
             manufacturer = normalizedManufacturer(),
             model = normalizedModel(),
             oemLabel = oemLabel,
@@ -4715,28 +4640,6 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Restarts DiPlay from scratch without killing the process: the session is torn down exactly as
-     * [exitApplication] does, then the launcher activity is started into a cleared task. Because
-     * the process survives, the VPN permission is not requested again.
-     *
-     * The activity is deliberately left running until the relaunch: finishing it first would make
-     * the start a background activity launch, which newer releases refuse.
-     */
-    private fun restartApplication() {
-        if (shuttingDown.get()) return
-        val relaunch = packageManager.getLaunchIntentForPackage(packageName)
-        if (relaunch == null) {
-            exitApplication()
-            return
-        }
-        relaunch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        restoreSettingsBaseline()
-        shutdown(terminateProcess = false, reason = "settings restart application") {
-            applicationContext.startActivity(relaunch)
-        }
-    }
-
     private fun exitApplication() {
         if (shuttingDown.get()) return
         restoreSettingsBaseline()
@@ -5112,7 +5015,8 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-
+			
+			
         // On Android 4.4 (KitKat / API 19) and custom head-unit ROMs, WindowInsetsControllerCompat
         // does not toggle WindowManager.LayoutParams.FLAG_FULLSCREEN or sticky immersive systemUiVisibility flags.
         if (hideTop) {
@@ -5137,6 +5041,7 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = flags
+			
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
