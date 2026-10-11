@@ -34,22 +34,31 @@ android {
 
     signingConfigs {
         create("release") {
-            val localKeystore = rootProject.file("release-signing.jks").takeIf { it.isFile }
-                ?: rootProject.file("release-signing.keystore").takeIf { it.isFile }
-            storeFile = providers.environmentVariable("ANDROID_KEYSTORE_PATH")
-                .orNull?.let { file(it) } ?: localKeystore ?: file("missing-release-keystore.jks")
-            storePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").getOrElse("diplay123456")
-            keyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").getOrElse("diplay")
-            keyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").getOrElse("diplay123456")
+            // 仅当 CI/本地提供了 KEYSTORE_PATH 时才设置 storeFile
+            val ksPath = System.getenv("KEYSTORE_PATH")
+            if (ksPath != null && file(ksPath).exists()) {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
         }
     }
 
     buildTypes {
+
+
+
         debug {
             applicationIdSuffix = ".hudtest"
             versionNameSuffix = "-hud-test"
         }
         release {
+            // 只有提供了 keystore 才挂签名；否则产出 unsigned APK
+            val ksPath = System.getenv("KEYSTORE_PATH")
+            if (ksPath != null && file(ksPath).exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             optimization {
                 enable = false
             }
